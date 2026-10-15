@@ -75,4 +75,19 @@ the site's terms and privacy policy, a few weeks) lifts it.
   expensive call - about 100 units now, so some 100 uploads a day (check Google's quota calculator:
   it cost 1 600 until recently). More is asked for in the Cloud console.
 
+## Responsibility
+
+This package is an independent, unofficial client: it is not affiliated with, endorsed by or
+sponsored by Google LLC (YouTube). It reaches their service on behalf of whoever runs it, and it
+does not redistribute their data beyond the short excerpts recorded as test fixtures. Its MIT
+licence covers this package's code only and grants no right to the service or to its data.
+
+Whoever installs and runs this package is responsible for complying with the YouTube API Services's
+terms ([YouTube API Services Terms of
+Service](https://developers.google.com/youtube/terms/api-services-terms-of-service)), for obtaining
+whatever they require (an account, a key, a licence or subscription, an attribution or a citation, a
+rate limit to respect), and for any use made of what it returns. The authors publish it free of
+charge, make no commercial use of it, and accept no liability for how it is used (see
+[LICENSE](LICENSE)).
+
 License: MIT since 2026-10-09; earlier versions remain published under LGPL-3.0-or-later.
