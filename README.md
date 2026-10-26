@@ -1,13 +1,13 @@
 # omnipost/youtube
 
-YouTube for [omniscient/omnipost](https://github.com/glitchr-studio/omnipost): the channel and its
+YouTube for [omnisense/omnipost](https://github.com/glitchr-omnisense/omnipost): the channel and its
 videos read with an API key, videos and Shorts uploaded through OAuth - the YouTube Data API v3.
 
 ```php
 $youtube = (new YouTubeProviderFactory($http))->create(['api_key' => '...', 'channel_id' => 'UC...']);   // $http: the application's HTTP client; none given, the factory makes its own
 ```
 
-No framework needed: the package requires `omniscient/omnipost` and `symfony/http-client`. In a
+No framework needed: the package requires `omnisense/omnipost` and `symfony/http-client`. In a
 Symfony application, the same through the bundle's configuration:
 
 ```yaml
