@@ -4,6 +4,7 @@ namespace Omnipost\YouTube;
 
 use Omnipost\Exception\InvalidConfigException;
 use Omnipost\Exception\ProviderException;
+use Omnipost\Http\Redaction;
 use Omnipost\Exception\UnauthorizedException;
 use Omnipost\Model\Token;
 use Symfony\Component\HttpClient\HttpClient;
@@ -89,10 +90,10 @@ final class Api
         try {
             $location = $response->getHeaders(false)['location'][0] ?? null;
         } catch (HttpExceptionInterface $e) {
-            throw new ProviderException(self::PROVIDER, 'YouTube could not be reached: '.$e->getMessage(), null, null, $e);
+            throw Redaction::withoutArguments(new ProviderException(self::PROVIDER, 'YouTube could not be reached: '.Redaction::text($e->getMessage(), $this->secrets()), null, null, Redaction::copy($e, $this->secrets())));
         }
 
-        return $location ?? throw new ProviderException(self::PROVIDER, 'No upload URL in YouTube\'s answer.');
+        return $location ?? throw Redaction::withoutArguments(new ProviderException(self::PROVIDER, 'No upload URL in YouTube\'s answer.'));
     }
 
     /**
@@ -121,18 +122,18 @@ final class Api
      */
     public function download(string $url): array
     {
-        $tmp = tmpfile() ?: throw new ProviderException(self::PROVIDER, 'No temporary file to bring the video to.');
+        $tmp = tmpfile() ?: throw Redaction::withoutArguments(new ProviderException(self::PROVIDER, 'No temporary file to bring the video to.'));
         try {
             $response = $this->http->request('GET', $url, ['timeout' => 300, 'max_duration' => 0]);
             if (200 !== $status = $response->getStatusCode()) {
-                throw new ProviderException(self::PROVIDER, \sprintf('The video could not be fetched from its URL (HTTP %d).', $status), $status);
+                throw Redaction::withoutArguments(new ProviderException(self::PROVIDER, \sprintf('The video could not be fetched from its URL (HTTP %d).', $status), $status));
             }
             foreach ($this->http->stream($response) as $chunk) {
                 fwrite($tmp, $chunk->getContent());
             }
             $type = $response->getHeaders(false)['content-type'][0] ?? null;
         } catch (HttpExceptionInterface $e) {
-            throw new ProviderException(self::PROVIDER, 'The video could not be fetched from its URL: '.$e->getMessage(), null, null, $e);
+            throw Redaction::withoutArguments(new ProviderException(self::PROVIDER, 'The video could not be fetched from its URL: '.Redaction::text($e->getMessage(), $this->secrets()), null, null, Redaction::copy($e, $this->secrets())));
         }
         $size = (int) ftell($tmp);
         rewind($tmp);
@@ -150,7 +151,7 @@ final class Api
     public function refresh(): Token
     {
         if (!$this->canRefresh()) {
-            throw new InvalidConfigException('The "youtube" provider needs: client_id, client_secret, refresh_token.');
+            throw Redaction::withoutArguments(new InvalidConfigException('The "youtube" provider needs: client_id, client_secret, refresh_token.'));
         }
 
         return $this->grant(['grant_type' => 'refresh_token', 'refresh_token' => $this->refreshToken]);
@@ -165,11 +166,11 @@ final class Api
     public function grant(array $fields): Token
     {
         if (!$this->clientId || !$this->clientSecret) {
-            throw new InvalidConfigException('The "youtube" provider needs: client_id, client_secret.');
+            throw Redaction::withoutArguments(new InvalidConfigException('The "youtube" provider needs: client_id, client_secret.'));
         }
         $data = $this->decode($this->request('POST', self::TOKEN_URL, ['body' => ['client_id' => $this->clientId, 'client_secret' => $this->clientSecret] + $fields]));
         if ('' === (string) ($data['access_token'] ?? '')) {
-            throw new ProviderException(self::PROVIDER, 'No token in Google\'s answer.');
+            throw Redaction::withoutArguments(new ProviderException(self::PROVIDER, 'No token in Google\'s answer.'));
         }
         $this->accessToken = (string) $data['access_token'];
         $this->expiresAt = isset($data['expires_in']) ? new \DateTimeImmutable('+'.(int) $data['expires_in'].' seconds') : null;
@@ -195,9 +196,9 @@ final class Api
             return ['X-Goog-Api-Key' => $this->apiKey];
         }
         if (!$this->canAuthorize()) {
-            throw new InvalidConfigException($oauth
+            throw Redaction::withoutArguments(new InvalidConfigException($oauth
                 ? 'The "youtube" provider needs: client_id, client_secret, refresh_token (or an access_token) - the channel\'s consent, for what a key cannot do.'
-                : 'The "youtube" provider needs: api_key (or client_id, client_secret, refresh_token).');
+                : 'The "youtube" provider needs: api_key (or client_id, client_secret, refresh_token).'));
         }
         // A minute's margin; a token given as an option has no known end: it is used until Google refuses it.
         if (null === $this->accessToken || (null !== $this->expiresAt && $this->expiresAt <= new \DateTimeImmutable('+60 seconds') && $this->canRefresh())) {
@@ -205,6 +206,16 @@ final class Api
         }
 
         return ['Authorization' => 'Bearer '.$this->accessToken];
+    }
+
+    /**
+     * The credentials this API holds, masked wherever a failure would quote them.
+     *
+     * @return list<string>
+     */
+    private function secrets(): array
+    {
+        return array_values(array_filter([$this->apiKey, $this->clientSecret, $this->refreshToken, $this->accessToken], static fn (?string $secret): bool => null !== $secret && '' !== $secret));
     }
 
     /** @param array<string, mixed> $options */
@@ -216,7 +227,7 @@ final class Api
 
             return $response;
         } catch (HttpExceptionInterface $e) {
-            throw new ProviderException(self::PROVIDER, 'YouTube could not be reached: '.$e->getMessage(), null, null, $e);
+            throw Redaction::withoutArguments(new ProviderException(self::PROVIDER, 'YouTube could not be reached: '.Redaction::text($e->getMessage(), $this->secrets()), null, null, Redaction::copy($e, $this->secrets())));
         }
     }
 
@@ -227,7 +238,7 @@ final class Api
             $status = $response->getStatusCode();
             $data = json_decode($response->getContent(false), true);
         } catch (HttpExceptionInterface $e) {
-            throw new ProviderException(self::PROVIDER, 'YouTube could not be reached: '.$e->getMessage(), null, null, $e);
+            throw Redaction::withoutArguments(new ProviderException(self::PROVIDER, 'YouTube could not be reached: '.Redaction::text($e->getMessage(), $this->secrets()), null, null, Redaction::copy($e, $this->secrets())));
         }
         $data = \is_array($data) ? $data : [];
         if ($status < 400 && !isset($data['error'])) {
@@ -245,10 +256,10 @@ final class Api
         }
         // insufficientPermissions: a 403 for a token without the scope the call needs - connected again with it.
         if (401 === $status || \in_array($reason, ['invalid_grant', 'invalid_client', 'unauthorized_client', 'authError', 'insufficientPermissions'], true)) {
-            throw new UnauthorizedException(self::PROVIDER, $message, $status, $reason);
+            throw Redaction::withoutArguments(new UnauthorizedException(self::PROVIDER, $message, $status, $reason));
         }
 
-        throw new ProviderException(self::PROVIDER, $message, $status, $reason);
+        throw Redaction::withoutArguments(new ProviderException(self::PROVIDER, $message, $status, $reason));
     }
 
     /**
