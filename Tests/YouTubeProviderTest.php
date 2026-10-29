@@ -63,11 +63,19 @@ final class YouTubeProviderTest extends TestCase
             if ('oauth2.googleapis.com' === parse_url($url, \PHP_URL_HOST)) {
                 parse_str((string) $body, $form);
 
+                if ('1//noscope' === ($form['refresh_token'] ?? null)) {
+                    return self::json(['access_token' => 'ya29.noscope', 'expires_in' => 3599, 'scope' => 'https://www.googleapis.com/auth/userinfo.email', 'token_type' => 'Bearer']);
+                }
+
                 return match ($form['grant_type'] ?? null) {
                     'refresh_token' => '1//revoked' === $form['refresh_token'] ? self::json(['error' => 'invalid_grant', 'error_description' => 'Token has been expired or revoked.'], 400) : self::json(['access_token' => 'ya29.'.++$this->tokens, 'expires_in' => 3599, 'scope' => 'https://www.googleapis.com/auth/youtube.upload', 'token_type' => 'Bearer']),
                     'authorization_code' => self::json(['access_token' => 'ya29.new', 'expires_in' => 3599, 'refresh_token' => '1//new', 'scope' => 'https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly', 'token_type' => 'Bearer']),
                     default => self::json(['error' => 'unsupported_grant_type'], 400),
                 };
+            }
+            if ('Bearer ya29.noscope' === ($headers['authorization'] ?? null)) {
+                // YouTube Data API's answer to a token without the scope it needs (its "Errors" page: 403, reason insufficientPermissions)
+                return self::json(['error' => ['code' => 403, 'message' => 'Request had insufficient authentication scopes.', 'errors' => [['message' => 'Insufficient Permission', 'domain' => 'global', 'reason' => 'insufficientPermissions']], 'status' => 'PERMISSION_DENIED']], 403);
             }
             if ('cdn.example' === parse_url($url, \PHP_URL_HOST)) {
                 return new MockResponse(str_repeat('v', 1000), ['response_headers' => ['Content-Type' => 'video/mp4']]);
@@ -293,6 +301,29 @@ final class YouTubeProviderTest extends TestCase
             self::fail('A revoked grant is refused.');
         } catch (UnauthorizedException $e) {
             self::assertSame('invalid_grant', $e->providerCode);
+        }
+    }
+
+    /** The post's link (Post::$link) goes into the description, where YouTube makes it a link: it was dropped. */
+    public function testTheLinkGoesIntoTheDescription(): void
+    {
+        $short = $this->short();
+        $post = new Post($short->kind, $short->media, $short->caption, $short->title, $short->tags, $short->coverUrl, null, $short->variants, link: 'https://site.example/strauss');
+        $this->provider()->publish($post->for(Platform::YOUTUBE));
+
+        $start = $this->calls('POST', '/upload/youtube/v3/videos')[0];
+        self::assertSame("Strauss, tonight.\n\nhttps://site.example/strauss\n\n#violin", json_decode($start['body'], true)['snippet']['description']);
+    }
+
+    /** A token without the scope a call needs is a token to connect again, as a revoked one. */
+    public function testATokenWithoutTheScopeIsUnauthorized(): void
+    {
+        try {
+            $this->provider(['refresh_token' => '1//noscope'])->publish($this->short()->for(Platform::YOUTUBE));
+            self::fail('A token without the scope is refused.');
+        } catch (UnauthorizedException $e) {
+            self::assertSame('insufficientPermissions', $e->providerCode);
+            self::assertSame(403, $e->status);
         }
     }
 

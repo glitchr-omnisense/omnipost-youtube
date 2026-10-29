@@ -243,7 +243,8 @@ final class Api
             $message = (string) ($data['error_description'] ?? $error ?? \sprintf('HTTP %d.', $status));
             $reason = \is_string($error) ? $error : null;
         }
-        if (401 === $status || \in_array($reason, ['invalid_grant', 'invalid_client', 'unauthorized_client', 'authError'], true)) {
+        // insufficientPermissions: a 403 for a token without the scope the call needs - connected again with it.
+        if (401 === $status || \in_array($reason, ['invalid_grant', 'invalid_client', 'unauthorized_client', 'authError', 'insufficientPermissions'], true)) {
             throw new UnauthorizedException(self::PROVIDER, $message, $status, $reason);
         }
 

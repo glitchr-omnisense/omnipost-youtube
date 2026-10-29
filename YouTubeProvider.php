@@ -125,7 +125,7 @@ final class YouTubeProvider implements PublisherInterface, FeedInterface, Refres
         $metadata = [
             'snippet' => array_filter([
                 'title' => (string) $post->title,
-                'description' => $post->text(),
+                'description' => $post->text($this->capabilities()->linkInCaption),
                 'tags' => array_values(array_map(static fn (string $t) => ltrim($t, '#'), $post->tags)),
                 'categoryId' => $post->options['category_id'] ?? $this->categoryId,
             ], static fn ($v) => null !== $v && [] !== $v),

@@ -155,16 +155,13 @@ omnipost:
 
 | Answer | Exception |
 |---|---|
-| HTTP 401; reason `invalid_grant`, `invalid_client`, `unauthorized_client`, `authError` | `UnauthorizedException` (`providerCode` the reason) |
-| any other error (`quotaExceeded`, `insufficientPermissions`, 404...) | `ProviderException` with the status and the API's first reason |
+| HTTP 401; reason `invalid_grant`, `invalid_client`, `unauthorized_client`, `authError`, `insufficientPermissions` (a 403: a token without the scope the call needs) | `UnauthorizedException` (`providerCode` the reason) |
+| any other error (`quotaExceeded`, 404...) | `ProviderException` with the status and the API's first reason |
 | transport error | `ProviderException` (`YouTube could not be reached: ...`), chained |
 | a video not found by `status()` | `ProviderException` (404, `videoNotFound`) |
 | the channel not found | `ProviderException` (404, `channelNotFound`) |
 | a credential missing for the call | `InvalidConfigException` naming it |
 | a post the network would refuse | `InvalidPostException`, nothing sent |
-
-> [!WARNING]
-> Known defect: a token without the scope the call needs (403 `insufficientPermissions`) is a `ProviderException`, where `UnauthorizedException` ("lacks a permission: the account must be connected again") is documented for it.
 
 ## Verified, and not
 
