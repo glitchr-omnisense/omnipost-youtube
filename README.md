@@ -3,6 +3,11 @@
 YouTube for [omnisense/omnipost](https://github.com/glitchr-omnisense/omnipost): the channel and its
 videos read with an API key, videos and Shorts uploaded through OAuth - the YouTube Data API v3.
 
+Contracts: publish (`PublisherInterface`), feed (`FeedInterface`), token refresh
+(`RefreshableInterface`) and OAuth (`OAuthInterface`). No share link: YouTube has no share page on
+the web (a page cannot be shared to it, a video is uploaded); the networks that have one are in
+omnipost's core (`Omnipost\Share\`).
+
 ```php
 $youtube = (new YouTubeProviderFactory($http))->create(['api_key' => '...', 'channel_id' => 'UC...']);   // $http: the application's HTTP client; none given, the factory makes its own
 ```
