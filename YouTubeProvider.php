@@ -22,6 +22,8 @@ use Omnipost\Model\Violation;
 use Omnipost\Platform;
 use Omnipost\PublisherInterface;
 use Omnipost\Validator;
+use Omnisense\Contracts\Policy\DeclaresUsagePolicyInterface;
+use Omnisense\Contracts\Policy\UsagePolicy;
 
 /**
  * A YouTube channel: who it is, its uploads, and a video uploaded - a
@@ -35,7 +37,7 @@ use Omnipost\Validator;
  * project that has not passed Google's audit are locked private anyway,
  * and the channel's owner makes them public in YouTube Studio.
  */
-final class YouTubeProvider implements PublisherInterface, FeedInterface, RefreshableInterface, OAuthInterface
+final class YouTubeProvider implements PublisherInterface, FeedInterface, RefreshableInterface, OAuthInterface, DeclaresUsagePolicyInterface
 {
     public const AUTHORIZE_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 
@@ -60,6 +62,12 @@ final class YouTubeProvider implements PublisherInterface, FeedInterface, Refres
     public function getName(): string
     {
         return 'youtube';
+    }
+
+    /** Its usage policy, as policy.json declares it (the platform's terms, read on its verifiedAt). */
+    public function usagePolicy(): UsagePolicy
+    {
+        return UsagePolicy::fromFile(__DIR__.'/policy.json');
     }
 
     public function getPlatform(): Platform

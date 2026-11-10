@@ -4,9 +4,12 @@ namespace Omnipost\YouTube;
 
 use Omnipost\Exception\InvalidConfigException;
 use Omnipost\Exception\ProviderException;
-use Omnipost\Http\Redaction;
+use Omnipost\Exception\RateLimitedException;
 use Omnipost\Exception\UnauthorizedException;
+use Omnipost\Http\Redaction;
+use Omnipost\Http\Throttle;
 use Omnipost\Model\Token;
+use Omnisense\Contracts\Policy\Backoff;
 use Symfony\Component\HttpClient\HttpClient;
 use Symfony\Contracts\HttpClient\Exception\ExceptionInterface as HttpExceptionInterface;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
@@ -20,6 +23,15 @@ use Symfony\Contracts\HttpClient\ResponseInterface;
  * a refused grant are an UnauthorizedException, the rest a
  * ProviderException with Google's reason (quotaExceeded, uploadLimitExceeded...).
  * Through the application's HTTP client when one is given.
+ *
+ * Given the provider's Backoff (the factory's Config::backoff()), a call to
+ * Google is refused while a wait lasts (UsageLimitReachedException, nothing
+ * sent); a 429 and Google's quota and rate reasons are a
+ * RateLimitedException (a ProviderException), a Retry-After holding the
+ * next calls. Every call is sent once: nothing here retries, and an upload
+ * that failed is not resumed nor started again, so a video is never
+ * inserted twice by omnipost. An expired access token is refreshed before
+ * the call, never after a refusal.
  */
 final class Api
 {
@@ -27,6 +39,9 @@ final class Api
     public const BASE_URI = 'https://www.googleapis.com/youtube/v3';
     public const UPLOAD_URI = 'https://www.googleapis.com/upload/youtube/v3';
     public const TOKEN_URL = 'https://oauth2.googleapis.com/token';
+
+    /** Google's reasons for a call refused by a quota or a rate. */
+    public const RATE_LIMIT_REASONS = ['quotaExceeded', 'rateLimitExceeded', 'userRateLimitExceeded', 'dailyLimitExceeded', 'uploadLimitExceeded', 'RESOURCE_EXHAUSTED'];
 
     private readonly HttpClientInterface $http;
 
@@ -41,6 +56,7 @@ final class Api
         private readonly string $baseUri = self::BASE_URI,
         private readonly string $uploadUri = self::UPLOAD_URI,
         ?HttpClientInterface $http = null,
+        private readonly ?Backoff $backoff = null,
     ) {
         $this->http = $http ?? HttpClient::create();
     }
@@ -221,6 +237,7 @@ final class Api
     /** @param array<string, mixed> $options */
     private function request(string $method, string $url, array $options): ResponseInterface
     {
+        Throttle::before($this->backoff);
         try {
             $response = $this->http->request($method, $url, $options);
             $response->getStatusCode();
@@ -236,10 +253,12 @@ final class Api
     {
         try {
             $status = $response->getStatusCode();
+            $headers = $response->getHeaders(false);
             $data = json_decode($response->getContent(false), true);
         } catch (HttpExceptionInterface $e) {
             throw Redaction::withoutArguments(new ProviderException(self::PROVIDER, 'YouTube could not be reached: '.Redaction::text($e->getMessage(), $this->secrets()), null, null, Redaction::copy($e, $this->secrets())));
         }
+        $wait = Throttle::after($this->backoff, $status, $headers);
         $data = \is_array($data) ? $data : [];
         if ($status < 400 && !isset($data['error'])) {
             return $data;
@@ -257,6 +276,9 @@ final class Api
         // insufficientPermissions: a 403 for a token without the scope the call needs - connected again with it.
         if (401 === $status || \in_array($reason, ['invalid_grant', 'invalid_client', 'unauthorized_client', 'authError', 'insufficientPermissions'], true)) {
             throw Redaction::withoutArguments(new UnauthorizedException(self::PROVIDER, $message, $status, $reason));
+        }
+        if (429 === $status || \in_array($reason, self::RATE_LIMIT_REASONS, true)) {
+            throw Redaction::withoutArguments(new RateLimitedException(self::PROVIDER, $message, $status, \is_string($reason) ? $reason : null, $wait));
         }
 
         throw Redaction::withoutArguments(new ProviderException(self::PROVIDER, $message, $status, $reason));

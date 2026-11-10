@@ -156,12 +156,33 @@ omnipost:
 | Answer | Exception |
 |---|---|
 | HTTP 401; reason `invalid_grant`, `invalid_client`, `unauthorized_client`, `authError`, `insufficientPermissions` (a 403: a token without the scope the call needs) | `UnauthorizedException` (`providerCode` the reason) |
-| any other error (`quotaExceeded`, 404...) | `ProviderException` with the status and the API's first reason |
+| HTTP 429; reason `quotaExceeded`, `rateLimitExceeded`, `userRateLimitExceeded`, `dailyLimitExceeded`, `uploadLimitExceeded` | `RateLimitedException`, a `ProviderException` (`providerCode` the reason, `retryAfter` a Retry-After's, which holds the next calls) |
+| any other error (404...) | `ProviderException` with the status and the API's first reason |
 | transport error | `ProviderException` (`YouTube could not be reached: ...`), chained |
 | a video not found by `status()` | `ProviderException` (404, `videoNotFound`) |
 | the channel not found | `ProviderException` (404, `channelNotFound`) |
 | a credential missing for the call | `InvalidConfigException` naming it |
 | a post the network would refuse | `InvalidPostException`, nothing sent |
+
+## Usage policy
+
+`policy.json` (read 2026-11-10 against
+[the quota costs](https://developers.google.com/youtube/v3/determine_quota_cost),
+[videos.insert](https://developers.google.com/youtube/v3/docs/videos/insert) and the
+[developer policies](https://developers.google.com/youtube/terms/developer-policies)):
+
+- `publish`: 100 a day per Google Cloud project, videos.insert's own bucket (1 a call);
+- 10,000 units a day for the rest, counted by cost: `status` 1, `account` 1, `feed` 3, `delete` 50
+  (`publish` 0 there);
+- caching 30 days at most, then deleted or refreshed; YouTube credited as the source wherever its
+  content shows, with its brand features; a link to YouTube's Terms of Service and a privacy policy
+  linking Google's; the API services never resold nor redistributed; commercial clients allowed.
+- videos.insert now says that videos uploaded from unverified projects are not restricted to
+  private.
+
+Nothing is retried: an upload refused or failed is not resumed nor started again (videos.insert
+has no idempotency key); `status()` or the channel's feed says whether it went up. See the core's
+`docs/policies.md`.
 
 ## Verified, and not
 

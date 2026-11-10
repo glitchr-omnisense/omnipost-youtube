@@ -1,0 +1,65 @@
+{
+    "$schema": "https://github.com/glitchr-omnisense/contracts/blob/1.x/resources/usage-policy.schema.json",
+    "provider": "youtube",
+    "rateLimits": [
+        {
+            "max": 100,
+            "window": "day",
+            "scope": "application",
+            "operations": [
+                "publish"
+            ],
+            "note": "videos.insert has its own default allocation, the Video Uploads bucket: 100 calls a day per Google Cloud project, 1 each (determine_quota_cost and videos/insert, read 2026-11-10). publish() makes one videos.insert (the resumable upload's opening call; the bytes' PUT goes to the URL it answers). Quota resets at midnight Pacific time."
+        },
+        {
+            "max": 10000,
+            "window": "day",
+            "scope": "application",
+            "operations": [],
+            "unit": "units",
+            "cost": {
+                "account": 1,
+                "delete": 50,
+                "feed": 3,
+                "publish": 0,
+                "status": 1
+            },
+            "note": "10,000 units a day per project for every method but search.list and videos.insert (determine_quota_cost, read 2026-11-10: videos.list, channels.list and playlistItems.list 1 unit each, videos.delete, videos.update and thumbnails.set 50). An operation costs the units of the methods it makes: account 1 (channels.list), feed 3 (channels.list, playlistItems.list, videos.list; 2 for an empty page), status 1 (videos.list), delete 50 (videos.delete), publish 0 (videos.insert only, the limit above)."
+        }
+    ],
+    "concurrency": null,
+    "rights": {
+        "commercial": "allowed",
+        "openSourceRequired": false,
+        "caching": {
+            "permission": "allowed",
+            "maxTtl": 2592000
+        },
+        "storage": "contract",
+        "redistribution": "forbidden",
+        "attribution": {
+            "required": true,
+            "text": "YouTube",
+            "url": "https://www.youtube.com/t/terms",
+            "where": [
+                "display"
+            ]
+        },
+        "licence": null
+    },
+    "requirements": {
+        "key": true,
+        "userAgent": {
+            "required": false,
+            "pattern": null
+        }
+    },
+    "provenance": {
+        "terms": "https://developers.google.com/youtube/terms/api-services-terms-of-service",
+        "policy": "https://developers.google.com/youtube/terms/developer-policies",
+        "verifiedAt": "2026-11-10",
+        "declaredBy": "maintainer",
+        "contact": null,
+        "notes": "Developer policies (read 2026-11-10): statistics retrieved as Non-Authorized Data stored 30 days at most, other Authorized Data 30 calendar days then deleted or refreshed (III.E.4); tokens kept as long as necessary; a revoked token revoked programmatically and its Authorized Data deleted within 7 days (30 after a revocation on Google's security page); a user's deletion request honoured within 7 days. Every feature showing YouTube content makes YouTube clear as its source with YouTube's brand features, on every device, never obscuring YouTube's attribution (III.F.2; logos per YouTube's branding guidelines). The application links to YouTube's Terms of Service and its users agree to them; its privacy policy, accepted before use, links to Google's and says how to revoke access (III.A). Selling, redistributing or sublicensing the API services is not allowed; ads not sold on a page whose only content is API data (III.G.1); selling an API client is (III.G.2). API credentials never embedded in open-source projects (III.D.1.d). More quota through an API Compliance Audit (III.D.3); YouTube may audit any client (III.H). videos/insert now says videos uploaded from unverified API projects are not restricted to private viewing mode. No idempotency key exists for videos.insert: a resumable upload's session can be resumed, which this provider does not do (an upload that failed is not sent again)."
+    }
+}
