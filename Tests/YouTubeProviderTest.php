@@ -14,13 +14,14 @@ use Omnipost\Model\Variant;
 use Omnipost\Platform;
 use Omnipost\YouTube\YouTubeProvider;
 use Omnipost\YouTube\YouTubeProviderFactory;
+use Omnisense\Contracts\Http\Data;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\HttpClient\MockHttpClient;
 use Symfony\Component\HttpClient\Response\MockResponse;
 
 final class YouTubeProviderTest extends TestCase
 {
-    /** @var list<array{method: string, url: string, path: string, query: array<string, string>, headers: array<string, string>, body: string}> */
+    /** @var list<array{method: string, url: string, path: string, query: array<mixed>, headers: array<string, string>, body: string}> */
     private array $calls = [];
 
     private int $tokens = 0;
@@ -38,14 +39,15 @@ final class YouTubeProviderTest extends TestCase
         @unlink($this->video);
     }
 
+    /** @param array<string, mixed> $options */
     private function provider(array $options = []): YouTubeProvider
     {
         $http = new MockHttpClient(function (string $method, string $url, array $options): MockResponse {
             $path = (string) parse_url($url, \PHP_URL_PATH);
             parse_str((string) parse_url($url, \PHP_URL_QUERY), $query);
             $headers = [];
-            foreach ($options['headers'] ?? [] as $header) {
-                [$name, $value] = explode(': ', $header, 2);
+            foreach (\is_array($options['headers'] ?? null) ? $options['headers'] : [] as $header) {
+                [$name, $value] = explode(': ', \is_string($header) ? $header : '', 2) + [1 => ''];
                 $headers[strtolower($name)] = $value;
             }
             $body = $options['body'] ?? '';
@@ -54,14 +56,14 @@ final class YouTubeProviderTest extends TestCase
             } elseif (\is_callable($body)) {
                 $chunks = '';
                 while ('' !== $chunk = $body(8192)) {
-                    $chunks .= $chunk;
+                    $chunks .= \is_string($chunk) ? $chunk : '';
                 }
                 $body = $chunks;
             }
-            $this->calls[] = ['method' => $method, 'url' => $url, 'path' => $path, 'query' => $query, 'headers' => $headers, 'body' => (string) $body];
+            $this->calls[] = ['method' => $method, 'url' => $url, 'path' => $path, 'query' => $query, 'headers' => $headers, 'body' => \is_string($body) ? $body : ''];
 
             if ('oauth2.googleapis.com' === parse_url($url, \PHP_URL_HOST)) {
-                parse_str((string) $body, $form);
+                parse_str(\is_string($body) ? $body : '', $form);
 
                 if ('1//noscope' === ($form['refresh_token'] ?? null)) {
                     return self::json(['access_token' => 'ya29.noscope', 'expires_in' => 3599, 'scope' => 'https://www.googleapis.com/auth/userinfo.email', 'token_type' => 'Bearer']);
@@ -103,9 +105,10 @@ final class YouTubeProviderTest extends TestCase
             };
         });
 
-        return (new YouTubeProviderFactory($http))->create($options + ['api_key' => 'AIza-key', 'channel_id' => 'UCabc', 'client_id' => 'cid.apps.googleusercontent.com', 'client_secret' => 'csecret', 'refresh_token' => '1//refresh']);
+        return self::youtube($http, $options + ['api_key' => 'AIza-key', 'channel_id' => 'UCabc', 'client_id' => 'cid.apps.googleusercontent.com', 'client_secret' => 'csecret', 'refresh_token' => '1//refresh']);
     }
 
+    /** @param array<mixed> $data */
     private static function json(array $data, int $status = 200): MockResponse
     {
         return new MockResponse((string) json_encode($data), ['http_code' => $status, 'response_headers' => ['Content-Type' => 'application/json']]);
@@ -126,7 +129,7 @@ final class YouTubeProviderTest extends TestCase
             ->withVariant(new Variant(Platform::YOUTUBE, title: 'Strauss, Sonata'));
     }
 
-    /** @return list<array{method: string, url: string, path: string, query: array<string, string>, headers: array<string, string>, body: string}> */
+    /** @return list<array{method: string, url: string, path: string, query: array<mixed>, headers: array<string, string>, body: string}> */
     private function calls(string $method, string $path): array
     {
         return array_values(array_filter($this->calls, static fn (array $c) => $c['method'] === $method && $c['path'] === $path));
@@ -228,7 +231,7 @@ final class YouTubeProviderTest extends TestCase
 
         $start = $this->calls('POST', '/upload/youtube/v3/videos')[0];
         self::assertSame('video/mp4', $start['headers']['x-upload-content-type']);
-        self::assertSame('unlisted', json_decode($start['body'], true)['status']['privacyStatus'], 'the variant\'s privacy');
+        self::assertSame('unlisted', Data::of(json_decode($start['body'], true))->get('status.privacyStatus'), 'the variant\'s privacy');
         self::assertSame(str_repeat('v', 1000), $this->calls('PUT', '/upload/youtube/v3/videos')[0]['body']);
     }
 
@@ -238,7 +241,7 @@ final class YouTubeProviderTest extends TestCase
 
         $this->provider(['privacy' => 'public'])->publish($post->for(Platform::YOUTUBE));
 
-        $status = json_decode($this->calls('POST', '/upload/youtube/v3/videos')[0]['body'], true)['status'];
+        $status = Data::of(json_decode($this->calls('POST', '/upload/youtube/v3/videos')[0]['body'], true))->get('status');
         self::assertSame(['privacyStatus' => 'private', 'selfDeclaredMadeForKids' => false, 'publishAt' => '2099-01-01T18:00:00Z'], $status);
     }
 
@@ -341,7 +344,8 @@ final class YouTubeProviderTest extends TestCase
     public function testTokensRefreshAndOAuth(): void
     {
         $youtube = $this->provider();
-        self::assertNull($youtube->token(), 'nothing drawn yet');
+        $none = $youtube->token();
+        self::assertNull($none, 'nothing drawn yet');
 
         $token = $youtube->refresh();
         self::assertSame('ya29.1', $token->accessToken);
@@ -349,7 +353,7 @@ final class YouTubeProviderTest extends TestCase
         self::assertTrue($token->isExpiring(1));
         parse_str($this->calls[0]['body'], $form);
         self::assertSame(['client_id' => 'cid.apps.googleusercontent.com', 'client_secret' => 'csecret', 'grant_type' => 'refresh_token', 'refresh_token' => '1//refresh'], $form);
-        self::assertSame('ya29.1', $youtube->token()->accessToken);
+        self::assertSame('ya29.1', $youtube->token()?->accessToken);
 
         $url = $youtube->authorizationUrl('https://site.example/admin/youtube', 'xyz');
         self::assertStringStartsWith('https://accounts.google.com/o/oauth2/v2/auth?', $url);
@@ -380,7 +384,7 @@ final class YouTubeProviderTest extends TestCase
         $this->provider()->publish($post->for(Platform::YOUTUBE));
 
         $start = $this->calls('POST', '/upload/youtube/v3/videos')[0];
-        self::assertSame("Strauss, tonight.\n\nhttps://site.example/strauss\n\n#violin", json_decode($start['body'], true)['snippet']['description']);
+        self::assertSame("Strauss, tonight.\n\nhttps://site.example/strauss\n\n#violin", Data::of(json_decode($start['body'], true))->get('snippet.description'));
     }
 
     /** A token without the scope a call needs is a token to connect again, as a revoked one. */
@@ -397,7 +401,7 @@ final class YouTubeProviderTest extends TestCase
 
     public function testWithoutCredentialsOnlyWhatNeedsNoneWorks(): void
     {
-        $youtube = (new YouTubeProviderFactory(new MockHttpClient()))->create();
+        $youtube = self::youtube(new MockHttpClient(), []);
 
         self::assertTrue($youtube->capabilities()->titleRequired);
         try {
@@ -434,7 +438,11 @@ final class YouTubeProviderTest extends TestCase
         ];
     }
 
-    /** @return array<string, mixed> */
+    /**
+     * @param array<string, mixed> $status
+     *
+     * @return array<string, mixed>
+     */
     private static function uploaded(string $uploadStatus, array $status = []): array
     {
         return ['id' => 'vid123', 'snippet' => ['title' => 'Strauss, Sonata', 'publishedAt' => '2026-10-03T09:00:00Z'], 'status' => $status + ['uploadStatus' => $uploadStatus, 'privacyStatus' => 'public']];
@@ -456,7 +464,7 @@ final class YouTubeProviderTest extends TestCase
         try {
             foreach ($answers as $answer) {
                 try {
-                    (new YouTubeProviderFactory(new \Symfony\Component\HttpClient\MockHttpClient($answer)))->create(['api_key' => 'youtube-key-123', 'channel_id' => 'UCabc', 'client_id' => 'cid.apps.googleusercontent.com', 'client_secret' => 'youtube-secret-456', 'refresh_token' => 'youtube-refresh-789', 'access_token' => 'youtube-access-012'])->account();
+                    self::youtube(new MockHttpClient($answer), ['api_key' => 'youtube-key-123', 'channel_id' => 'UCabc', 'client_id' => 'cid.apps.googleusercontent.com', 'client_secret' => 'youtube-secret-456', 'refresh_token' => 'youtube-refresh-789', 'access_token' => 'youtube-access-012'])->account();
                     self::fail('no exception');
                 } catch (\Omnipost\Exception\OmnipostException $e) {
                     for ($one = $e; null !== $one; $one = $one->getPrevious()) {

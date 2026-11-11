@@ -48,12 +48,12 @@ final class YouTubeProviderFactory extends ProviderFactory
 
     protected function build(Config $config): ProviderInterface
     {
-        $string = static fn (string $key): ?string => $config[$key] ? (string) $config[$key] : null;
+        $string = static fn (string $key): ?string => $config[$key] ? $config->string($key) : null;
 
         return new YouTubeProvider(
-            new Api($string('api_key'), $string('client_id'), $string('client_secret'), $string('refresh_token'), $string('access_token'), (string) $config['base_uri'], (string) $config['upload_uri'], $this->http, $config->backoff()),
+            new Api($string('api_key'), $string('client_id'), $string('client_secret'), $string('refresh_token'), $string('access_token'), $config->string('base_uri') ?? '', $config->string('upload_uri') ?? '', $this->http, $config->backoff()),
             $string('channel_id'),
-            (string) $config['privacy'],
+            $config->string('privacy') ?? '',
             $string('category_id'),
         );
     }

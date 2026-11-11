@@ -134,11 +134,11 @@ final class YouTubeProvider implements PublisherInterface, FeedInterface, Refres
             'snippet' => array_filter([
                 'title' => (string) $post->title,
                 'description' => $post->text($this->capabilities()->linkInCaption),
-                'tags' => array_values(array_map(static fn (string $t) => ltrim($t, '#'), $post->tags)),
+                'tags' => array_map(static fn (string $t) => ltrim($t, '#'), $post->tags),
                 'categoryId' => $post->options['category_id'] ?? $this->categoryId,
             ], static fn ($v) => null !== $v && [] !== $v),
             'status' => [
-                'privacyStatus' => $scheduled ? 'private' : (string) ($post->options['privacy'] ?? $this->privacy),
+                'privacyStatus' => $scheduled ? 'private' : Data::cast($post->options['privacy'] ?? $this->privacy),
                 'selfDeclaredMadeForKids' => false,
             ] + ($scheduled ? ['publishAt' => $post->scheduledAt->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d\TH:i:s\Z')] : []),
         ];

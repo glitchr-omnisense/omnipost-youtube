@@ -14,6 +14,10 @@
   Nothing retries: an upload is opened once and its bytes sent once (`Tests/PolicyTest.php`: a 429
   on the opening call, a 503 on the bytes, the 101st upload never sent).
 - PHPStan at level max (`phpstan.neon`), the 112 errors there were in `phpstan-baseline.neon`.
+- PHPStan at level max with an empty baseline, types only: `Data` reads the answers (the same
+  values as the `(string)` / `(int)` casts, an array giving "" / 0 rather than "Array" / 1), the
+  factory reads its options with `Config::string()` (the truthy checks kept), a post's `privacy`
+  option that is not a scalar is sent as "" rather than "Array".
 
 ### Fixed
 
