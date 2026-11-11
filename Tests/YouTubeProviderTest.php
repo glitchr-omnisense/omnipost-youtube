@@ -283,6 +283,43 @@ final class YouTubeProviderTest extends TestCase
         self::assertSame(['vid123', PublicationState::PUBLISHED, 'https://www.youtube.com/watch?v=vid123'], [$read->id, $read->state, $read->permalink]);
     }
 
+    /**
+     * An answer of another shape than the API's - a list where a string or an object belongs, a
+     * string where a list or an object does - is a ProviderException, not a TypeError; a token that
+     * is a list is no token ("Array" was taken for one), an error's reason that is a list no code.
+     */
+    public function testAnAnswerOfAnotherShapeIsAProviderException(): void
+    {
+        $youtube = static fn (array ...$answers): YouTubeProvider => self::youtube(new MockHttpClient(array_map(static fn (array $answer): MockResponse => self::json($answer, isset($answer['error']) ? 400 : 200), $answers)));
+        $oauth = static fn (array ...$answers): YouTubeProvider => self::youtube(new MockHttpClient(array_map(static fn (array $answer): MockResponse => self::json($answer), $answers)), ['client_id' => 'cid.apps.googleusercontent.com', 'client_secret' => 'csecret', 'refresh_token' => '1//refresh']);
+        $upload = static fn (array $video): YouTubeProvider => self::youtube(new MockHttpClient([new MockResponse('', ['response_headers' => ['Location' => 'https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&upload_id=XYZ']]), self::json($video)]));
+        $feed = static fn (array ...$answers): YouTubeProvider => $youtube(['items' => [self::channel()]], ...$answers);
+        $malformed = '[youtube] YouTube answered in another shape than its API\'s.';
+        $cases = [
+            'a video read back that is a string' => [static fn () => $youtube(['items' => ['vid123']])->status('vid123'), $malformed],
+            'an upload\'s publishAt a list' => [fn () => $upload(self::uploaded('processed', ['publishAt' => ['2099-01-01T18:00:00Z']]))->publish($this->short()->for(Platform::YOUTUBE)), $malformed],
+            'the channel\'s snippet a string' => [static fn () => $youtube(['items' => [['id' => 'UCabc', 'snippet' => 'Claire']]])->account(), $malformed],
+            'the channel\'s title a list' => [static fn () => $youtube(['items' => [['id' => 'UCabc', 'snippet' => ['title' => ['Claire']]]]])->account(), $malformed],
+            'a thumbnail\'s URL a list' => [static fn () => $youtube(['items' => [['id' => 'UCabc', 'snippet' => ['title' => 'Claire', 'thumbnails' => ['high' => ['url' => ['https://yt3.example/c.jpg']]]]]]])->account(), $malformed],
+            'the uploads playlist a list' => [static fn () => $youtube(['items' => [['id' => 'UCabc', 'contentDetails' => ['relatedPlaylists' => ['uploads' => ['UUabc']]]]]], ['items' => []])->feed(), $malformed],
+            'the feed\'s items a string' => [static fn () => $feed(['items' => 'PL'])->feed(), $malformed],
+            'a playlist item\'s video id a list' => [static fn () => $feed(['items' => [['contentDetails' => ['videoId' => ['shortA']]]]], ['items' => []])->feed(), $malformed],
+            'a video\'s duration a list' => [static fn () => $feed(['items' => [['contentDetails' => ['videoId' => 'shortA']]]], ['items' => [['id' => 'shortA', 'contentDetails' => ['duration' => ['PT58S']]]]])->feed(), $malformed],
+            'the next page token a list' => [static fn () => $feed(['items' => [], 'nextPageToken' => ['CAUQAA']])->feed(), $malformed],
+            'a refresh token a list' => [static fn () => $oauth(['access_token' => 'ya29.1', 'expires_in' => 3599, 'refresh_token' => ['1//new']])->refresh(), $malformed],
+            'an access token a list' => [static fn () => $oauth(['access_token' => ['ya29.1'], 'expires_in' => 3599])->refresh(), '[youtube] No token in Google\'s answer.'],
+            'an error\'s reason a list' => [static fn () => $youtube(['error' => ['code' => 400, 'message' => 'Invalid value.', 'errors' => [['reason' => ['invalid']]]]])->status('vid123'), '[youtube] Invalid value.'],
+        ];
+        foreach ($cases as $case => [$call, $message]) {
+            try {
+                $call();
+                self::fail($case.': read as it came.');
+            } catch (ProviderException $e) {
+                self::assertSame($message, $e->getMessage(), $case);
+            }
+        }
+    }
+
     public function testTheValidatorRefusesAShortWithoutATitleBeforeAnyRequest(): void
     {
         $youtube = $this->provider();

@@ -184,15 +184,21 @@ final class Api
         if (!$this->clientId || !$this->clientSecret) {
             throw Redaction::withoutArguments(new InvalidConfigException('The "youtube" provider needs: client_id, client_secret.'));
         }
-        $data = $this->decode($this->request('POST', self::TOKEN_URL, ['body' => ['client_id' => $this->clientId, 'client_secret' => $this->clientSecret] + $fields]));
-        if ('' === (string) ($data['access_token'] ?? '')) {
+        $data = Data::of($this->decode($this->request('POST', self::TOKEN_URL, ['body' => ['client_id' => $this->clientId, 'client_secret' => $this->clientSecret] + $fields])));
+        // A token that is not a string nor a number is none ("Array" was taken for one).
+        if ('' === $token = $data->text('access_token')) {
             throw Redaction::withoutArguments(new ProviderException(self::PROVIDER, 'No token in Google\'s answer.'));
         }
-        $this->accessToken = (string) $data['access_token'];
-        $this->expiresAt = isset($data['expires_in']) ? new \DateTimeImmutable('+'.(int) $data['expires_in'].' seconds') : null;
-        $this->refreshToken = $data['refresh_token'] ?? $this->refreshToken;
+        // A refresh token that is not a string nor a number is another shape (the property refused it).
+        $refreshToken = $data->get('refresh_token');
+        if (null !== $refreshToken && !\is_scalar($refreshToken)) {
+            throw Redaction::withoutArguments(Data::malformed());
+        }
+        $this->accessToken = $token;
+        $this->expiresAt = $data->has('expires_in') ? new \DateTimeImmutable('+'.$data->number('expires_in').' seconds') : null;
+        $this->refreshToken = null !== $refreshToken ? (string) $refreshToken : $this->refreshToken;
 
-        return new Token($this->accessToken, $this->expiresAt, $this->refreshToken, isset($data['scope']) ? explode(' ', (string) $data['scope']) : []);
+        return new Token($this->accessToken, $this->expiresAt, $this->refreshToken, $data->has('scope') ? explode(' ', $data->text('scope')) : []);
     }
 
     private function canRefresh(): bool
@@ -259,7 +265,7 @@ final class Api
             throw Redaction::withoutArguments(new ProviderException(self::PROVIDER, 'YouTube could not be reached: '.Redaction::text($e->getMessage(), $this->secrets()), null, null, Redaction::copy($e, $this->secrets())));
         }
         $wait = Throttle::after($this->backoff, $status, $headers);
-        $data = \is_array($data) ? $data : [];
+        $data = Data::map($data);
         if ($status < 400 && !isset($data['error'])) {
             return $data;
         }
@@ -267,21 +273,24 @@ final class Api
         // The API: {error: {code, message, errors: [{reason}]}}; the token endpoint: {error: "invalid_grant", error_description}.
         $error = $data['error'] ?? null;
         if (\is_array($error)) {
-            $message = (string) ($error['message'] ?? \sprintf('HTTP %d.', $status));
-            $reason = $error['errors'][0]['reason'] ?? $error['status'] ?? null;
+            $error = Data::of($error);
+            $message = Data::cast($error->get('message') ?? \sprintf('HTTP %d.', $status));
+            $reason = $error->get('errors.0.reason') ?? $error->get('status');
         } else {
-            $message = (string) ($data['error_description'] ?? $error ?? \sprintf('HTTP %d.', $status));
+            $message = Data::cast($data['error_description'] ?? $error ?? \sprintf('HTTP %d.', $status));
             $reason = \is_string($error) ? $error : null;
         }
+        // The reason as the exception's code: a scalar as PHP gave it, none when it is a list or an object.
+        $code = \is_scalar($reason) ? (string) $reason : null;
         // insufficientPermissions: a 403 for a token without the scope the call needs - connected again with it.
         if (401 === $status || \in_array($reason, ['invalid_grant', 'invalid_client', 'unauthorized_client', 'authError', 'insufficientPermissions'], true)) {
-            throw Redaction::withoutArguments(new UnauthorizedException(self::PROVIDER, $message, $status, $reason));
+            throw Redaction::withoutArguments(new UnauthorizedException(self::PROVIDER, $message, $status, $code));
         }
         if (429 === $status || \in_array($reason, self::RATE_LIMIT_REASONS, true)) {
             throw Redaction::withoutArguments(new RateLimitedException(self::PROVIDER, $message, $status, \is_string($reason) ? $reason : null, $wait));
         }
 
-        throw Redaction::withoutArguments(new ProviderException(self::PROVIDER, $message, $status, $reason));
+        throw Redaction::withoutArguments(new ProviderException(self::PROVIDER, $message, $status, $code));
     }
 
     /**

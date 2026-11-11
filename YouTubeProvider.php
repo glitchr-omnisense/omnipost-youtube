@@ -47,8 +47,8 @@ final class YouTubeProvider implements PublisherInterface, FeedInterface, Refres
     /** What YouTube takes for a Short, in seconds. */
     public const SHORT_MAX_DURATION = 180.0;
 
-    /** @var array<string, mixed>|null the channel, read once */
-    private ?array $channel = null;
+    /** The channel, read once. */
+    private ?Data $channel = null;
 
     public function __construct(
         private readonly Api $api,
@@ -160,14 +160,14 @@ final class YouTubeProvider implements PublisherInterface, FeedInterface, Refres
             }
         }
 
-        return self::publication($video, null);
+        return self::publication(Data::of($video), null);
     }
 
     public function status(string $publicationId): Publication
     {
         // As the channel when it can: a key does not see a private video.
         $videos = $this->api->get('videos', ['part' => 'status,snippet', 'id' => $publicationId], $this->api->canAuthorize());
-        $video = $videos['items'][0] ?? throw new ProviderException($this->getName(), \sprintf('No video "%s" (deleted, or private and read with a key).', $publicationId), 404, 'videoNotFound');
+        $video = Data::of($videos)->first('items') ?? throw new ProviderException($this->getName(), \sprintf('No video "%s" (deleted, or private and read with a key).', $publicationId), 404, 'videoNotFound');
 
         return self::publication($video, $publicationId);
     }
@@ -180,20 +180,19 @@ final class YouTubeProvider implements PublisherInterface, FeedInterface, Refres
     public function account(): Account
     {
         $channel = $this->channel();
-        $snippet = $channel['snippet'] ?? [];
-        $statistics = $channel['statistics'] ?? [];
-        $handle = $snippet['customUrl'] ?? null;
+        $snippet = $channel->object('snippet') ?? Data::of([]);
+        $handle = $snippet->get('customUrl');
 
         return new Account(
             Platform::YOUTUBE,
-            (string) $channel['id'],
-            (string) ($handle ?? $snippet['title'] ?? $channel['id']),
-            $snippet['title'] ?? null,
-            'https://www.youtube.com/'.($handle ?: 'channel/'.$channel['id']),
+            $channel->text('id'),
+            Data::cast($handle ?? $snippet->get('title') ?? $channel->get('id')),
+            $snippet->stringOrNull('title'),
+            'https://www.youtube.com/'.(Data::cast($handle) ?: 'channel/'.$channel->text('id')),
             self::thumbnail($snippet),
             // Hidden by the channel: not known.
-            ($statistics['hiddenSubscriberCount'] ?? false) || !isset($statistics['subscriberCount']) ? null : (int) $statistics['subscriberCount'],
-            isset($statistics['videoCount']) ? (int) $statistics['videoCount'] : null,
+            $channel->get('statistics.hiddenSubscriberCount') || !$channel->has('statistics.subscriberCount') ? null : $channel->number('statistics.subscriberCount'),
+            $channel->has('statistics.videoCount') ? $channel->number('statistics.videoCount') : null,
         );
     }
 
@@ -206,46 +205,48 @@ final class YouTubeProvider implements PublisherInterface, FeedInterface, Refres
      */
     public function feed(?string $cursor = null, int $limit = 25): Feed
     {
-        $uploads = $this->channel()['contentDetails']['relatedPlaylists']['uploads'] ?? throw new ProviderException($this->getName(), 'The channel has no uploads playlist.');
-        $page = $this->api->get('playlistItems', ['part' => 'snippet,contentDetails', 'playlistId' => $uploads, 'maxResults' => max(1, min(50, $limit)), 'pageToken' => $cursor], $this->mine());
-        $entries = array_values($page['items'] ?? []);
-        $ids = array_values(array_filter(array_map(static fn (array $e) => $e['contentDetails']['videoId'] ?? $e['snippet']['resourceId']['videoId'] ?? null, $entries)));
+        $uploads = $this->channel()->get('contentDetails.relatedPlaylists.uploads') ?? throw new ProviderException($this->getName(), 'The channel has no uploads playlist.');
+        $page = Data::of($this->api->get('playlistItems', ['part' => 'snippet,contentDetails', 'playlistId' => \is_scalar($uploads) ? $uploads : throw Data::malformed(), 'maxResults' => max(1, min(50, $limit)), 'pageToken' => $cursor], $this->mine()));
+        $entries = $page->objects('items');
+        $ids = array_values(array_filter(array_map(self::videoId(...), $entries)));
 
         $videos = [];
         if ($ids) {
-            foreach ($this->api->get('videos', ['part' => 'contentDetails,statistics', 'id' => implode(',', $ids)], $this->mine())['items'] ?? [] as $video) {
-                $videos[$video['id']] = $video;
+            $answer = Data::of($this->api->get('videos', ['part' => 'contentDetails,statistics', 'id' => implode(',', $ids)], $this->mine()));
+            // Items that are not a list: none, as foreach saw them.
+            foreach (\is_array($answer->get('items')) ? $answer->objects('items') : [] as $video) {
+                $videos[$video->stringOrNull('id') ?? ''] = $video;
             }
         }
 
         $items = [];
         foreach ($entries as $entry) {
-            $id = $entry['contentDetails']['videoId'] ?? $entry['snippet']['resourceId']['videoId'] ?? null;
+            $id = self::videoId($entry);
             if (null === $id) {
                 continue;
             }
-            $snippet = $entry['snippet'] ?? [];
-            $video = $videos[$id] ?? [];
-            $duration = isset($video['contentDetails']['duration']) ? self::seconds($video['contentDetails']['duration']) : null;
-            $statistics = $video['statistics'] ?? [];
+            $snippet = $entry->object('snippet') ?? Data::of([]);
+            $video = $videos[$id] ?? Data::of([]);
+            $duration = $video->stringOrNull('contentDetails.duration');
+            $duration = null !== $duration ? self::seconds($duration) : null;
             $items[] = new FeedItem(
                 $id,
                 null !== $duration && $duration <= self::SHORT_MAX_DURATION ? PostKind::REEL : PostKind::VIDEO,
                 'https://www.youtube.com/watch?v='.$id,
                 'https://www.youtube.com/embed/'.$id,
                 self::thumbnail($snippet),
-                $snippet['title'] ?? null,
-                self::date($entry['contentDetails']['videoPublishedAt'] ?? $snippet['publishedAt'] ?? null),
+                $snippet->stringOrNull('title'),
+                self::date($entry->stringOrNull('contentDetails.videoPublishedAt') ?? $snippet->stringOrNull('publishedAt')),
                 $duration,
                 [],
-                isset($statistics['likeCount']) ? (int) $statistics['likeCount'] : null,
-                isset($statistics['commentCount']) ? (int) $statistics['commentCount'] : null,
-                isset($statistics['viewCount']) ? (int) $statistics['viewCount'] : null,
-                ['playlistItem' => $entry, 'video' => $video],
+                $video->has('statistics.likeCount') ? $video->number('statistics.likeCount') : null,
+                $video->has('statistics.commentCount') ? $video->number('statistics.commentCount') : null,
+                $video->has('statistics.viewCount') ? $video->number('statistics.viewCount') : null,
+                ['playlistItem' => $entry->toArray(), 'video' => $video->toArray()],
             );
         }
 
-        return new Feed($items, $page['nextPageToken'] ?? null);
+        return new Feed($items, $page->stringOrNull('nextPageToken'));
     }
 
     /** The access token at hand - an hour's life - with the refresh token it was drawn from. */
@@ -295,8 +296,7 @@ final class YouTubeProvider implements PublisherInterface, FeedInterface, Refres
         return null === $this->channelId;
     }
 
-    /** @return array<string, mixed> */
-    private function channel(): array
+    private function channel(): Data
     {
         if (null !== $this->channel) {
             return $this->channel;
@@ -306,41 +306,49 @@ final class YouTubeProvider implements PublisherInterface, FeedInterface, Refres
         }
         $channels = $this->api->get('channels', ['part' => 'snippet,statistics,contentDetails'] + ($this->mine() ? ['mine' => true] : ['id' => $this->channelId]), $this->mine());
 
-        return $this->channel = $channels['items'][0] ?? throw new ProviderException($this->getName(), $this->mine() ? 'The account has no channel.' : \sprintf('No channel "%s".', $this->channelId), 404, 'channelNotFound');
+        return $this->channel = Data::of($channels)->first('items') ?? throw new ProviderException($this->getName(), $this->mine() ? 'The account has no channel.' : \sprintf('No channel "%s".', $this->channelId), 404, 'channelNotFound');
     }
 
     /**
      * The video as a publication. Its id is YouTube's - a string or a number, never empty - or the
      * id asked for when status() reads it back; an upload answered without one is no post: a
      * ProviderException, never a publication with an id that is not one.
-     *
-     * @param array<string, mixed> $video
      */
-    private static function publication(array $video, ?string $asked): Publication
+    private static function publication(Data $video, ?string $asked): Publication
     {
-        $id = $video['id'] ?? null;
+        $id = $video->get('id');
         $id = (\is_string($id) && '' !== $id) || \is_int($id) ? (string) $id : ($asked ?? throw new ProviderException(Api::PROVIDER, 'YouTube answered the upload without the video\'s id.'));
-        $status = $video['status'] ?? [];
         $permalink = 'https://www.youtube.com/watch?v='.$id;
-        $publishAt = self::date($status['publishAt'] ?? null);
+        $publishAt = self::date($video->stringOrNull('status.publishAt'));
+        $raw = $video->toArray();
 
-        return match ($status['uploadStatus'] ?? null) {
-            'failed', 'rejected', 'deleted' => new Publication(Platform::YOUTUBE, $id, PublicationState::FAILED, $permalink, (string) ($status['failureReason'] ?? $status['rejectionReason'] ?? $status['uploadStatus']), raw: $video),
-            'processed' => null !== $publishAt && $publishAt > new \DateTimeImmutable() && 'private' === ($status['privacyStatus'] ?? null)
+        return match ($video->get('status.uploadStatus')) {
+            'failed', 'rejected', 'deleted' => new Publication(Platform::YOUTUBE, $id, PublicationState::FAILED, $permalink, Data::cast($video->get('status.failureReason') ?? $video->get('status.rejectionReason') ?? $video->get('status.uploadStatus')), raw: $raw),
+            'processed' => null !== $publishAt && $publishAt > new \DateTimeImmutable() && 'private' === $video->get('status.privacyStatus')
                 // Scheduled: there, and not out yet.
-                ? new Publication(Platform::YOUTUBE, $id, PublicationState::PENDING, $permalink, raw: $video)
-                : new Publication(Platform::YOUTUBE, $id, PublicationState::PUBLISHED, $permalink, null, self::date($video['snippet']['publishedAt'] ?? null), $video),
-            default => new Publication(Platform::YOUTUBE, $id, PublicationState::PROCESSING, $permalink, raw: $video),
+                ? new Publication(Platform::YOUTUBE, $id, PublicationState::PENDING, $permalink, raw: $raw)
+                : new Publication(Platform::YOUTUBE, $id, PublicationState::PUBLISHED, $permalink, null, self::date($video->stringOrNull('snippet.publishedAt')), $raw),
+            default => new Publication(Platform::YOUTUBE, $id, PublicationState::PROCESSING, $permalink, raw: $raw),
         };
     }
 
-    /** @param array<string, mixed> $snippet */
-    private static function thumbnail(array $snippet): ?string
+    /** The playlist item's video id: null when it has none, a scalar as a string. */
+    private static function videoId(Data $entry): ?string
     {
-        $thumbnails = $snippet['thumbnails'] ?? [];
+        $id = $entry->get('contentDetails.videoId') ?? $entry->get('snippet.resourceId.videoId');
+
+        if (null === $id) {
+            return null;
+        }
+
+        return \is_scalar($id) ? (string) $id : throw Data::malformed();
+    }
+
+    private static function thumbnail(Data $snippet): ?string
+    {
         foreach (['maxres', 'high', 'standard', 'medium', 'default'] as $size) {
-            if (isset($thumbnails[$size]['url'])) {
-                return $thumbnails[$size]['url'];
+            if (null !== $url = $snippet->stringOrNull('thumbnails.'.$size.'.url')) {
+                return $url;
             }
         }
 

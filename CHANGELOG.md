@@ -21,6 +21,13 @@
   string nor a number is a `ProviderException` ("YouTube answered the upload without the video's
   id."), where it was a publication with the id `""` (and a warning) or `"Array"`, its permalink to
   no video; a video read back by `status()` with an id that is not one keeps the id asked for.
+- An answer of another shape than the API's is a `ProviderException` ("YouTube answered in another
+  shape than its API's."), not a `TypeError`: a video read back, a channel or its snippet that is
+  not an object, a feed's items that are not a list, a title, thumbnail URL, `publishAt`,
+  `publishedAt`, duration, video id, next page token or refresh token that is a list; an uploads
+  playlist that is a list is not sent as a nested query field. An access token that is a list is no
+  token ("No token in Google's answer.", where `"Array"` was taken for one); an error's reason that
+  is a list is no code (the error's own exception, where its constructor threw a `TypeError`).
 - A failure no longer carries the credentials: "could not be reached" quoted the HTTP client's message
   (the URL, a key in its query) and wrapped the client's own exception, and every trace kept the
   options (the `Authorization` bearer, the `X-Goog-Api-Key`) or a response holding them in its
