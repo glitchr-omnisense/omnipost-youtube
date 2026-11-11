@@ -213,9 +213,16 @@ final class YouTubeProvider implements PublisherInterface, FeedInterface, Refres
         $videos = [];
         if ($ids) {
             $answer = Data::of($this->api->get('videos', ['part' => 'contentDetails,statistics', 'id' => implode(',', $ids)], $this->mine()));
-            // Items that are not a list: none, as foreach saw them.
-            foreach (\is_array($answer->get('items')) ? $answer->objects('items') : [] as $video) {
-                $videos[$video->stringOrNull('id') ?? ''] = $video;
+            // Items that are not a list: none, as foreach saw them; an item that is a number or a
+            // boolean has no id (PHP read null), a text another shape (PHP threw on its offset).
+            $found = $answer->get('items');
+            foreach (\is_array($found) ? $found : [] as $video) {
+                if (\is_array($video)) {
+                    $video = Data::of($video);
+                    $videos[$video->stringOrNull('id') ?? ''] = $video;
+                } elseif (\is_string($video)) {
+                    throw Data::malformed();
+                }
             }
         }
 

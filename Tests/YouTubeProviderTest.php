@@ -308,6 +308,7 @@ final class YouTubeProviderTest extends TestCase
             'the feed\'s items a string' => [static fn () => $feed(['items' => 'PL'])->feed(), $malformed],
             'a playlist item\'s video id a list' => [static fn () => $feed(['items' => [['contentDetails' => ['videoId' => ['shortA']]]]], ['items' => []])->feed(), $malformed],
             'a video\'s duration a list' => [static fn () => $feed(['items' => [['contentDetails' => ['videoId' => 'shortA']]]], ['items' => [['id' => 'shortA', 'contentDetails' => ['duration' => ['PT58S']]]]])->feed(), $malformed],
+            'a video of the feed that is a string' => [static fn () => $feed(['items' => [['contentDetails' => ['videoId' => 'shortA']]]], ['items' => ['shortA']])->feed(), $malformed],
             'the next page token a list' => [static fn () => $feed(['items' => [], 'nextPageToken' => ['CAUQAA']])->feed(), $malformed],
             'a refresh token a list' => [static fn () => $oauth(['access_token' => 'ya29.1', 'expires_in' => 3599, 'refresh_token' => ['1//new']])->refresh(), $malformed],
             'an access token a list' => [static fn () => $oauth(['access_token' => ['ya29.1'], 'expires_in' => 3599])->refresh(), '[youtube] No token in Google\'s answer.'],
@@ -321,6 +322,22 @@ final class YouTubeProviderTest extends TestCase
                 self::assertSame($message, $e->getMessage(), $case);
             }
         }
+    }
+
+    /** A video of the feed that is a number is no video, as PHP read it: the others keep their durations. */
+    public function testAVideoOfTheFeedThatIsANumberIsSkipped(): void
+    {
+        $youtube = self::youtube(new MockHttpClient([
+            self::json(['items' => [self::channel()]]),
+            self::json(['items' => [['contentDetails' => ['videoId' => 'shortA']], ['contentDetails' => ['videoId' => 'longB']]]]),
+            self::json(['items' => [7, ['id' => 'shortA', 'contentDetails' => ['duration' => 'PT58S']], true]]),
+        ]));
+
+        $feed = $youtube->feed();
+
+        self::assertCount(2, $feed->items);
+        self::assertSame(58.0, $feed->items[0]->duration);
+        self::assertNull($feed->items[1]->duration);
     }
 
     public function testTheValidatorRefusesAShortWithoutATitleBeforeAnyRequest(): void
