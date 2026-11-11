@@ -111,6 +111,15 @@ final class YouTubeProviderTest extends TestCase
         return new MockResponse((string) json_encode($data), ['http_code' => $status, 'response_headers' => ['Content-Type' => 'application/json']]);
     }
 
+    /** @param array<string, mixed> $options */
+    private static function youtube(MockHttpClient $http, array $options = ['access_token' => 'ya29.token']): YouTubeProvider
+    {
+        $provider = (new YouTubeProviderFactory($http))->create($options);
+        self::assertInstanceOf(YouTubeProvider::class, $provider);
+
+        return $provider;
+    }
+
     private function short(?string $path = null): Post
     {
         return Post::reel(Media::video('https://cdn.example/strauss.mp4', $path ?? $this->video, 42.0, 1080, 1920), 'Strauss, tonight.', null, ['violin'])
@@ -250,6 +259,28 @@ final class YouTubeProviderTest extends TestCase
 
         $this->expectException(ProviderException::class);
         $youtube->status('gone');
+    }
+
+    /**
+     * An upload answered without the video's id, or with one that is not an id, is no post: a
+     * ProviderException, never a publication with an empty id or "Array" (and a permalink to no
+     * video); a video read back with an id that is not one keeps the id asked for.
+     */
+    public function testAnAnswerWithoutAnIdIsNeverTakenForAPost(): void
+    {
+        $youtube = static fn (MockResponse ...$answers): YouTubeProvider => self::youtube(new MockHttpClient($answers));
+        $opened = new MockResponse('', ['response_headers' => ['Location' => 'https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&upload_id=XYZ']]);
+        foreach (['no id' => [], 'an id that is a list' => ['id' => ['vid123']], 'an empty id' => ['id' => '']] as $case => $id) {
+            try {
+                $youtube(clone $opened, self::json($id + array_diff_key(self::uploaded('uploaded'), ['id' => true])))->publish($this->short()->for(Platform::YOUTUBE));
+                self::fail($case.': taken for a post.');
+            } catch (ProviderException $e) {
+                self::assertSame('[youtube] YouTube answered the upload without the video\'s id.', $e->getMessage(), $case);
+            }
+        }
+
+        $read = $youtube(self::json(['items' => [['id' => ['vid123']] + self::uploaded('processed')]]))->status('vid123');
+        self::assertSame(['vid123', PublicationState::PUBLISHED, 'https://www.youtube.com/watch?v=vid123'], [$read->id, $read->state, $read->permalink]);
     }
 
     public function testTheValidatorRefusesAShortWithoutATitleBeforeAnyRequest(): void

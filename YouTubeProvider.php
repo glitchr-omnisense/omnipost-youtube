@@ -160,7 +160,7 @@ final class YouTubeProvider implements PublisherInterface, FeedInterface, Refres
             }
         }
 
-        return self::publication($video);
+        return self::publication($video, null);
     }
 
     public function status(string $publicationId): Publication
@@ -169,7 +169,7 @@ final class YouTubeProvider implements PublisherInterface, FeedInterface, Refres
         $videos = $this->api->get('videos', ['part' => 'status,snippet', 'id' => $publicationId], $this->api->canAuthorize());
         $video = $videos['items'][0] ?? throw new ProviderException($this->getName(), \sprintf('No video "%s" (deleted, or private and read with a key).', $publicationId), 404, 'videoNotFound');
 
-        return self::publication($video);
+        return self::publication($video, $publicationId);
     }
 
     public function delete(string $publicationId): void
@@ -309,10 +309,17 @@ final class YouTubeProvider implements PublisherInterface, FeedInterface, Refres
         return $this->channel = $channels['items'][0] ?? throw new ProviderException($this->getName(), $this->mine() ? 'The account has no channel.' : \sprintf('No channel "%s".', $this->channelId), 404, 'channelNotFound');
     }
 
-    /** @param array<string, mixed> $video */
-    private static function publication(array $video): Publication
+    /**
+     * The video as a publication. Its id is YouTube's - a string or a number, never empty - or the
+     * id asked for when status() reads it back; an upload answered without one is no post: a
+     * ProviderException, never a publication with an id that is not one.
+     *
+     * @param array<string, mixed> $video
+     */
+    private static function publication(array $video, ?string $asked): Publication
     {
-        $id = (string) $video['id'];
+        $id = $video['id'] ?? null;
+        $id = (\is_string($id) && '' !== $id) || \is_int($id) ? (string) $id : ($asked ?? throw new ProviderException(Api::PROVIDER, 'YouTube answered the upload without the video\'s id.'));
         $status = $video['status'] ?? [];
         $permalink = 'https://www.youtube.com/watch?v='.$id;
         $publishAt = self::date($status['publishAt'] ?? null);

@@ -17,6 +17,10 @@
 
 ### Fixed
 
+- An upload answered without the video's id is no post: no id, an empty one or one that is not a
+  string nor a number is a `ProviderException` ("YouTube answered the upload without the video's
+  id."), where it was a publication with the id `""` (and a warning) or `"Array"`, its permalink to
+  no video; a video read back by `status()` with an id that is not one keeps the id asked for.
 - A failure no longer carries the credentials: "could not be reached" quoted the HTTP client's message
   (the URL, a key in its query) and wrapped the client's own exception, and every trace kept the
   options (the `Authorization` bearer, the `X-Goog-Api-Key`) or a response holding them in its
