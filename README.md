@@ -33,6 +33,18 @@ omnipost:
 No option is required to build the provider: `capabilities()` and `authorizationUrl()` need no
 credential, and a call that needs one and finds none throws `InvalidConfigException`.
 
+## Install
+
+```sh
+composer require omnipost/youtube
+```
+
+It requires `omnisense/omnipost` `^1.0`, installed with it. A real call needs: **a YouTube Data API
+key** to read a channel's public videos, **an OAuth client** (Google Cloud) to upload. The first
+call, with this package:
+[omnisense/omnipost](https://github.com/glitchr-omnisense/omnipost#install-and-a-first-call)'s
+README.
+
 ## Reading, with a key
 
 `account()`: the channel (its handle, title, picture, subscribers unless hidden, videos count).
